@@ -1,9 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"sync/atomic"
 )
 
@@ -51,17 +53,55 @@ func main() {
 		w.Write([]byte("OK"))
 	})
 
-	mux.HandleFunc("GET /api/metrics",func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /admin/metrics",func(w http.ResponseWriter, r *http.Request) {
 		x := apiConfig.getFileServerHits()
-		text := fmt.Sprintf("Hits: %d",x)
-		fmt.Fprintf(w,text)
+		text := fmt.Sprintf(`<html>
+  <body>
+    <h1>Welcome, Chirpy Admin</h1>
+    <p>Chirpy has been visited %d times!</p>
+  </body>
+</html>`,x)
+		w.Header().Set("Content-Type","text/html")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(text))
 	})
 
 	
-	mux.HandleFunc("POST /api/reset",func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /admin/reset",func(w http.ResponseWriter, r *http.Request) {
 		apiConfig.resetFileServerHits()
 	})
 
+	mux.HandleFunc("POST /api/validate_chirp",func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+
+		type msg struct{
+			Body string `json:"body"`
+		}
+
+		type response struct{
+			Cleaned_Body string `json:"cleaned_body"`
+		}
+
+		chirp := msg{}
+
+		decoder := json.NewDecoder(r.Body)
+		if err := decoder.Decode(&chirp); err != nil {
+			respondWithError(w,http.StatusInternalServerError,"Something went wrong")
+			return
+		}
+
+		if len(chirp.Body) > 140 {
+			respondWithError(w,http.StatusBadRequest,"Chirp is too long")
+			return
+		}
+
+		res := cleanedBody(chirp.Body)
+		respondWithJSON(w,http.StatusOK,response{Cleaned_Body: res})
+
+
+	})
+
+	
 	
 
 	srv := &http.Server{  // a struct that describes the server configuration
@@ -72,4 +112,43 @@ func main() {
 	log.Printf("Serving on port: %s\n",port)
 	log.Fatal(srv.ListenAndServe())
 
+}
+
+func respondWithJSON (w http.ResponseWriter, code int, payload interface{}) error{
+
+	data,err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	w.Header().Set("Content-Type","application/json")
+	w.WriteHeader(code)
+	w.Write(data)
+	return nil
+}
+
+func respondWithError (w http.ResponseWriter, code int, msg string) error{
+
+	return respondWithJSON(w,code,map[string]string{
+		"error":msg})
+	}
+
+
+
+func cleanedBody(s string) string{
+
+	// wordsToBeRemoved := []string{"fornax","sharbert","kerfuffle"}
+	var cleanedWords []string
+	words := strings.Fields(s)
+	for _,word := range words{
+        l := strings.ToLower(word)
+		if l == "fornax"|| l == "sharbert" || l =="kerfuffle"{
+			cleanedWords = append(cleanedWords, "****")
+			continue
+		}
+		cleanedWords = append(cleanedWords, word)
+	}
+	
+    res := strings.Join(cleanedWords," ")
+	return res
 }
