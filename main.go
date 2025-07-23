@@ -1,23 +1,26 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github/anansi-1/Chirpy/internal/database"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"sync/atomic"
-)
 
+	"github.com/joho/godotenv"
+	_ "github.com/lib/pq"
+)
 
 type apiConfig struct {
 	fileserverHits atomic.Int32
+	dbQueries *database.Queries
 }
 
-// func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler{
-// 	cfg.fileserverHits.Add(1)
-// 	return  next
-// }
+
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -35,7 +38,17 @@ func (cfg *apiConfig) resetFileServerHits() {
 
 func main() {
 
+	godotenv.Load()
+
+	dbURL := os.Getenv("DB_URL")
+	db,err := sql.Open("postgres",dbURL)
+	if err != nil {
+		log.Fatal(err)
+	}
+	dbQueries := database.New(db)
+
 	apiConfig := apiConfig{
+		dbQueries: dbQueries,
 	}
 	const port = "8080"
 	const filepathRoot = "."
