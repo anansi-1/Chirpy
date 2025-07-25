@@ -55,8 +55,11 @@ func main() {
 	mux.HandleFunc("POST /admin/reset", apiConfig.handleReset)
 	mux.HandleFunc("POST /api/validate_chirp", handleValidateChirp)
 	mux.HandleFunc("POST /api/users",apiConfig.handleCreateUser)
+	mux.HandleFunc("POST /api/chirps",apiConfig.handleCreateChirp)
+	mux.HandleFunc("GET /api/chirps",apiConfig.handleGetChirps)
+	mux.HandleFunc("GET /api/chirps/{chirpID}",apiConfig.handleGetChirpsByID)
 
-	srv := &http.Server{ // a struct that describes the server configuration
+	srv := &http.Server{ 
 		Addr:    ":" + port,
 		Handler: mux,
 	}

@@ -3,8 +3,11 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"github/anansi-1/Chirpy/internal/database"
 	"net/http"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 func handleHealthzfunc(w http.ResponseWriter, r *http.Request) {
@@ -28,8 +31,8 @@ func (cfg *apiConfig) handleMetrics(w http.ResponseWriter, r *http.Request) {
 
 func (cfg *apiConfig) handleReset(w http.ResponseWriter, r *http.Request) {
 
-	if cfg.platform != "dev"{
-		respondWithError(w,http.StatusForbidden,"Your are not authorized to acces this")
+	if cfg.platform != "dev" {
+		respondWithError(w, http.StatusForbidden, "Your are not authorized to acces this")
 		return
 	}
 
@@ -42,7 +45,7 @@ func (cfg *apiConfig) handleReset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.WriteHeader(http.StatusOK) 
+	w.WriteHeader(http.StatusOK)
 }
 
 func handleValidateChirp(w http.ResponseWriter, r *http.Request) {
@@ -69,11 +72,11 @@ func handleValidateChirp(w http.ResponseWriter, r *http.Request) {
 func (cfg *apiConfig) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 
 	type UserResponse struct {
-	ID        string `json:"id"`
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
-	Email     string `json:"email"`
-}
+		ID        string `json:"id"`
+		CreatedAt string `json:"created_at"`
+		UpdatedAt string `json:"updated_at"`
+		Email     string `json:"email"`
+	}
 
 	defer r.Body.Close()
 	var newUser User
@@ -91,7 +94,7 @@ func (cfg *apiConfig) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-		resp := UserResponse{
+	resp := UserResponse{
 		ID:        user.ID.String(),
 		CreatedAt: user.CreatedAt.Format(time.RFC3339),
 		UpdatedAt: user.UpdatedAt.Format(time.RFC3339),
@@ -100,4 +103,127 @@ func (cfg *apiConfig) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 
 	respondWithJSON(w, http.StatusCreated, resp)
 
+}
+
+func (cfg *apiConfig) handleCreateChirp(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+
+	type ChirpRequest struct {
+		Body   string `json:"body"`
+		UserID string `json:"user_id"`
+	}
+
+	type ChirpResponse struct {
+		ID        string `json:"id"`
+		CreatedAt string `json:"created_at"`
+		UpdatedAt string `json:"updated_at"`
+		Body      string `json:"body"`
+		UserID    string `json:"user_id"`
+	}
+
+	var newChirp ChirpRequest
+
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(&newChirp); err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid JSON")
+		return
+	}
+
+	userUUID, err := uuid.Parse(newChirp.UserID)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid user_id format")
+		return
+	}
+
+	chirp, err := cfg.dbQueries.CreateChirp(r.Context(), database.CreateChirpParams{
+		Body:   newChirp.Body,
+		UserID: uuid.NullUUID{UUID: userUUID, Valid: true},
+	})
+
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Error Creating Chirp")
+		return
+	}
+
+	resp := ChirpResponse{
+		ID:        chirp.ID.String(),
+		CreatedAt: chirp.CreatedAt.Format(time.RFC3339),
+		UpdatedAt: chirp.UpdatedAt.Format(time.RFC3339),
+		Body:      chirp.Body,
+		UserID:    chirp.UserID.UUID.String(), 
+	}
+
+	respondWithJSON(w, http.StatusCreated, resp)
+}
+
+
+func (cfg *apiConfig) handleGetChirps(w http.ResponseWriter, r *http.Request) {
+
+		type ChirpResponse struct {
+		ID        string `json:"id"`
+		CreatedAt string `json:"created_at"`
+		UpdatedAt string `json:"updated_at"`
+		Body      string `json:"body"`
+		UserID    string `json:"user_id"`
+	}
+
+	chirp_rows,err := cfg.dbQueries.GetAllChirps(r.Context())
+		if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Error Getting Chirp")
+		return
+	}
+	
+	var chirps []ChirpResponse
+
+	for _,chirp := range chirp_rows {
+
+		resp := ChirpResponse{
+		ID:        chirp.ID.String(),
+		CreatedAt: chirp.CreatedAt.Format(time.RFC3339),
+		UpdatedAt: chirp.UpdatedAt.Format(time.RFC3339),
+		Body:      chirp.Body,
+		UserID:    chirp.UserID.UUID.String(), 
+	}
+	chirps = append(chirps, resp)
+
+}
+
+	respondWithJSON(w,http.StatusOK,chirps)
+
+}
+
+func (cfg *apiConfig) handleGetChirpsByID(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+
+	type ChirpResponse struct {
+		ID        string `json:"id"`
+		CreatedAt string `json:"created_at"`
+		UpdatedAt string `json:"updated_at"`
+		Body      string `json:"body"`
+		UserID    string `json:"user_id"`
+	}
+
+	chirpID := r.PathValue("chirpID")
+	chirpUUID, err := uuid.Parse(chirpID)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid chirp ID format")
+		return
+	}
+
+	chirp, err := cfg.dbQueries.GetChirpsByID(r.Context(), chirpUUID)
+	if err != nil {
+		respondWithError(w, http.StatusNotFound, "Chirp not found")
+		return
+	}
+
+
+	resp := ChirpResponse{
+		ID:        chirp.ID.String(),
+		CreatedAt: chirp.CreatedAt.Format(time.RFC3339),
+		UpdatedAt: chirp.UpdatedAt.Format(time.RFC3339),
+		Body:      chirp.Body,
+		UserID:    chirp.UserID.UUID.String(), 
+	}
+
+	respondWithJSON(w, http.StatusOK, resp)
 }
