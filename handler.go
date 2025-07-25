@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github/anansi-1/Chirpy/internal/database"
+	"github/anansi-1/Chirpy/internal/auth"
 	"net/http"
 	"time"
 
@@ -70,6 +71,12 @@ func handleValidateChirp(w http.ResponseWriter, r *http.Request) {
 }
 
 func (cfg *apiConfig) handleCreateUser(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+
+	type createUserRequest struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
 
 	type UserResponse struct {
 		ID        string `json:"id"`
@@ -78,22 +85,29 @@ func (cfg *apiConfig) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		Email     string `json:"email"`
 	}
 
-	defer r.Body.Close()
-	var newUser User
-
-	Decoder := json.NewDecoder(r.Body)
-	if err := Decoder.Decode(&newUser); err != nil {
+	var req createUserRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondWithError(w, http.StatusBadRequest, "Invalid JSON")
 		return
 	}
 
-	user, err := cfg.dbQueries.CreateUser(r.Context(), newUser.Email)
-
-	if err != nil {
-		respondWithError(w, http.StatusBadRequest, "Error Creating User")
+	if req.Email == "" || req.Password == "" {
+		respondWithError(w, http.StatusBadRequest, "Email and password are required")
 		return
 	}
-
+	hashedPassword, err := auth.HashPassword(req.Password)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Error hashing password")
+		return
+	}
+	user, err := cfg.dbQueries.CreateUser(r.Context(), database.CreateUserParams{
+		Email:          req.Email,
+		HashedPassword: hashedPassword,
+	})
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Error creating user")
+		return
+	}
 	resp := UserResponse{
 		ID:        user.ID.String(),
 		CreatedAt: user.CreatedAt.Format(time.RFC3339),
@@ -102,8 +116,8 @@ func (cfg *apiConfig) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondWithJSON(w, http.StatusCreated, resp)
-
 }
+
 
 func (cfg *apiConfig) handleCreateChirp(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
@@ -227,3 +241,4 @@ func (cfg *apiConfig) handleGetChirpsByID(w http.ResponseWriter, r *http.Request
 
 	respondWithJSON(w, http.StatusOK, resp)
 }
+
