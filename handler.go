@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 )
 
 func handleHealthzfunc(w http.ResponseWriter, r *http.Request) {
@@ -26,8 +27,22 @@ func (cfg *apiConfig) handleMetrics(w http.ResponseWriter, r *http.Request) {
 }
 
 func (cfg *apiConfig) handleReset(w http.ResponseWriter, r *http.Request) {
-	cfg.resetFileServerHits()
-	w.WriteHeader(http.StatusOK)
+
+	if cfg.platform != "dev"{
+		respondWithError(w,http.StatusForbidden,"Your are not authorized to acces this")
+		return
+	}
+
+	// cfg.resetFileServerHits()
+	// w.WriteHeader(http.StatusOK)
+
+	err := cfg.dbQueries.DeleteAllUsers(r.Context())
+	if err != nil {
+		http.Error(w, "Failed to delete users", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK) 
 }
 
 func handleValidateChirp(w http.ResponseWriter, r *http.Request) {
@@ -49,4 +64,40 @@ func handleValidateChirp(w http.ResponseWriter, r *http.Request) {
 
 	res := cleanedBody(chirp.Body)
 	respondWithJSON(w, http.StatusOK, map[string]string{"cleaned_body": res})
+}
+
+func (cfg *apiConfig) handleCreateUser(w http.ResponseWriter, r *http.Request) {
+
+	type UserResponse struct {
+	ID        string `json:"id"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+	Email     string `json:"email"`
+}
+
+	defer r.Body.Close()
+	var newUser User
+
+	Decoder := json.NewDecoder(r.Body)
+	if err := Decoder.Decode(&newUser); err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid JSON")
+		return
+	}
+
+	user, err := cfg.dbQueries.CreateUser(r.Context(), newUser.Email)
+
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Error Creating User")
+		return
+	}
+
+		resp := UserResponse{
+		ID:        user.ID.String(),
+		CreatedAt: user.CreatedAt.Format(time.RFC3339),
+		UpdatedAt: user.UpdatedAt.Format(time.RFC3339),
+		Email:     user.Email,
+	}
+
+	respondWithJSON(w, http.StatusCreated, resp)
+
 }

@@ -6,8 +6,10 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 	"sync/atomic"
 
+	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 )
@@ -15,6 +17,13 @@ import (
 type apiConfig struct {
 	fileserverHits atomic.Int32
 	dbQueries      *database.Queries
+	platform 		string
+}
+type User struct {
+	ID        uuid.UUID `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Email     string    `json:"email"`
 }
 
 func main() {
@@ -30,6 +39,7 @@ func main() {
 
 	apiConfig := apiConfig{
 		dbQueries: dbQueries,
+		platform: os.Getenv("PLATFORM"),
 	}
 
 	const port = "8080"
@@ -44,6 +54,7 @@ func main() {
 	mux.HandleFunc("GET /admin/metrics", apiConfig.handleMetrics)
 	mux.HandleFunc("POST /admin/reset", apiConfig.handleReset)
 	mux.HandleFunc("POST /api/validate_chirp", handleValidateChirp)
+	mux.HandleFunc("POST /api/users",apiConfig.handleCreateUser)
 
 	srv := &http.Server{ // a struct that describes the server configuration
 		Addr:    ":" + port,
