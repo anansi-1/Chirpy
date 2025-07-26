@@ -32,3 +32,8 @@ ORDER BY created_at ASC;
 SELECT id, created_at, updated_at, body, user_id 
 FROM chirps 
 WHERE id = $1;
+
+-- name: GetUserByEmail :one
+SELECT id, created_at, updated_at, email,hashed_password
+FROM users
+WHERE email =$1;

@@ -3,12 +3,13 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"github/anansi-1/Chirpy/internal/database"
 	"github/anansi-1/Chirpy/internal/auth"
+	"github/anansi-1/Chirpy/internal/database"
 	"net/http"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 func handleHealthzfunc(w http.ResponseWriter, r *http.Request) {
@@ -105,9 +106,14 @@ func (cfg *apiConfig) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		HashedPassword: hashedPassword,
 	})
 	if err != nil {
-		respondWithError(w, http.StatusBadRequest, "Error creating user")
+	if pgErr, ok := err.(*pq.Error); ok && pgErr.Code == "23505" {
+		respondWithError(w, http.StatusConflict, "Email already exists")
 		return
 	}
+	respondWithError(w, http.StatusBadRequest, "Error creating user")
+	return
+}
+
 	resp := UserResponse{
 		ID:        user.ID.String(),
 		CreatedAt: user.CreatedAt.Format(time.RFC3339),
@@ -117,7 +123,6 @@ func (cfg *apiConfig) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 
 	respondWithJSON(w, http.StatusCreated, resp)
 }
-
 
 func (cfg *apiConfig) handleCreateChirp(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
@@ -164,16 +169,15 @@ func (cfg *apiConfig) handleCreateChirp(w http.ResponseWriter, r *http.Request) 
 		CreatedAt: chirp.CreatedAt.Format(time.RFC3339),
 		UpdatedAt: chirp.UpdatedAt.Format(time.RFC3339),
 		Body:      chirp.Body,
-		UserID:    chirp.UserID.UUID.String(), 
+		UserID:    chirp.UserID.UUID.String(),
 	}
 
 	respondWithJSON(w, http.StatusCreated, resp)
 }
 
-
 func (cfg *apiConfig) handleGetChirps(w http.ResponseWriter, r *http.Request) {
 
-		type ChirpResponse struct {
+	type ChirpResponse struct {
 		ID        string `json:"id"`
 		CreatedAt string `json:"created_at"`
 		UpdatedAt string `json:"updated_at"`
@@ -181,28 +185,28 @@ func (cfg *apiConfig) handleGetChirps(w http.ResponseWriter, r *http.Request) {
 		UserID    string `json:"user_id"`
 	}
 
-	chirp_rows,err := cfg.dbQueries.GetAllChirps(r.Context())
-		if err != nil {
+	chirp_rows, err := cfg.dbQueries.GetAllChirps(r.Context())
+	if err != nil {
 		respondWithError(w, http.StatusBadRequest, "Error Getting Chirp")
 		return
 	}
-	
+
 	var chirps []ChirpResponse
 
-	for _,chirp := range chirp_rows {
+	for _, chirp := range chirp_rows {
 
 		resp := ChirpResponse{
-		ID:        chirp.ID.String(),
-		CreatedAt: chirp.CreatedAt.Format(time.RFC3339),
-		UpdatedAt: chirp.UpdatedAt.Format(time.RFC3339),
-		Body:      chirp.Body,
-		UserID:    chirp.UserID.UUID.String(), 
+			ID:        chirp.ID.String(),
+			CreatedAt: chirp.CreatedAt.Format(time.RFC3339),
+			UpdatedAt: chirp.UpdatedAt.Format(time.RFC3339),
+			Body:      chirp.Body,
+			UserID:    chirp.UserID.UUID.String(),
+		}
+		chirps = append(chirps, resp)
+
 	}
-	chirps = append(chirps, resp)
 
-}
-
-	respondWithJSON(w,http.StatusOK,chirps)
+	respondWithJSON(w, http.StatusOK, chirps)
 
 }
 
@@ -230,15 +234,60 @@ func (cfg *apiConfig) handleGetChirpsByID(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-
 	resp := ChirpResponse{
 		ID:        chirp.ID.String(),
 		CreatedAt: chirp.CreatedAt.Format(time.RFC3339),
 		UpdatedAt: chirp.UpdatedAt.Format(time.RFC3339),
 		Body:      chirp.Body,
-		UserID:    chirp.UserID.UUID.String(), 
+		UserID:    chirp.UserID.UUID.String(),
 	}
 
 	respondWithJSON(w, http.StatusOK, resp)
 }
 
+func (cfg *apiConfig) handleLogin(w http.ResponseWriter, r *http.Request) {
+
+	defer r.Body.Close()
+
+	type UserLoginRequest struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+
+	type LoginResponse struct {
+		ID        string `json:"id"`
+		CreatedAt string `json:"created_at"`
+		UpdatedAt string `json:"updated_at"`
+		Email     string `json:"email"`
+	}
+
+	var req UserLoginRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid JSON")
+		return
+	}
+
+	if req.Email == "" || req.Password == "" {
+		respondWithError(w, http.StatusBadRequest, "Email and password are required")
+		return
+	}
+	user,err := cfg.dbQueries.GetUserByEmail(r.Context(),req.Email)
+	if err != nil {
+		respondWithError(w,http.StatusUnauthorized,"Incorrect email or password")
+		return
+	}
+	err = auth.CheckPasswordHash(req.Password,user.HashedPassword)
+		if err != nil {
+			respondWithError(w,http.StatusUnauthorized,"Incorrect email or password")
+		return
+	}
+	resp := LoginResponse{
+		ID:        user.ID.String(),
+		CreatedAt: user.CreatedAt.Format(time.RFC3339),
+		UpdatedAt: user.UpdatedAt.Format(time.RFC3339),
+		Email:     user.Email,
+	}
+
+	respondWithJSON(w, http.StatusOK, resp)
+
+}
