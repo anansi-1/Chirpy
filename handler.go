@@ -128,8 +128,7 @@ func (cfg *apiConfig) handleCreateChirp(w http.ResponseWriter, r *http.Request) 
 	defer r.Body.Close()
 
 	type ChirpRequest struct {
-		Body   string `json:"body"`
-		UserID string `json:"user_id"`
+		Body string `json:"body"`
 	}
 
 	type ChirpResponse struct {
@@ -140,27 +139,30 @@ func (cfg *apiConfig) handleCreateChirp(w http.ResponseWriter, r *http.Request) 
 		UserID    string `json:"user_id"`
 	}
 
-	var newChirp ChirpRequest
-
-	decoder := json.NewDecoder(r.Body)
-	if err := decoder.Decode(&newChirp); err != nil {
-		respondWithError(w, http.StatusBadRequest, "Invalid JSON")
+	tokenStr, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Missing or invalid Authorization header")
 		return
 	}
 
-	userUUID, err := uuid.Parse(newChirp.UserID)
+	userID, err := auth.ValidateJWT(tokenStr, cfg.tokenSecret)
 	if err != nil {
-		respondWithError(w, http.StatusBadRequest, "Invalid user_id format")
+		respondWithError(w, http.StatusUnauthorized, "Invalid or expired token")
+		return
+	}
+
+	var newChirp ChirpRequest
+	if err := json.NewDecoder(r.Body).Decode(&newChirp); err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid JSON")
 		return
 	}
 
 	chirp, err := cfg.dbQueries.CreateChirp(r.Context(), database.CreateChirpParams{
 		Body:   newChirp.Body,
-		UserID: uuid.NullUUID{UUID: userUUID, Valid: true},
+		UserID: uuid.NullUUID{UUID: userID, Valid: true},
 	})
-
 	if err != nil {
-		respondWithError(w, http.StatusBadRequest, "Error Creating Chirp")
+		respondWithError(w, http.StatusBadRequest, "Error creating chirp")
 		return
 	}
 
@@ -250,8 +252,9 @@ func (cfg *apiConfig) handleLogin(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 
 	type UserLoginRequest struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
+		Email    		 string `json:"email"`
+		Password 		 string `json:"password"`
+		ExpiresInSeconds int    `json:"expires_in_seconds"`
 	}
 
 	type LoginResponse struct {
@@ -259,6 +262,7 @@ func (cfg *apiConfig) handleLogin(w http.ResponseWriter, r *http.Request) {
 		CreatedAt string `json:"created_at"`
 		UpdatedAt string `json:"updated_at"`
 		Email     string `json:"email"`
+		Token 	  string  `json:"token"`
 	}
 
 	var req UserLoginRequest
@@ -281,11 +285,25 @@ func (cfg *apiConfig) handleLogin(w http.ResponseWriter, r *http.Request) {
 			respondWithError(w,http.StatusUnauthorized,"Incorrect email or password")
 		return
 	}
+
+	const maxExpiration = time.Hour
+	expiration := maxExpiration
+	if req.ExpiresInSeconds > 0{
+		customDuration := time.Duration(req.ExpiresInSeconds)*time.Second
+		if customDuration < maxExpiration{
+			expiration = customDuration
+		}
+	}
+
+
+	token, err := auth.MakeJWT(user.ID,cfg.tokenSecret,expiration)
+
 	resp := LoginResponse{
 		ID:        user.ID.String(),
 		CreatedAt: user.CreatedAt.Format(time.RFC3339),
 		UpdatedAt: user.UpdatedAt.Format(time.RFC3339),
 		Email:     user.Email,
+		Token:	   token,
 	}
 
 	respondWithJSON(w, http.StatusOK, resp)

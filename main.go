@@ -18,6 +18,7 @@ type apiConfig struct {
 	fileserverHits atomic.Int32
 	dbQueries      *database.Queries
 	platform 		string
+	tokenSecret      string
 }
 type User struct {
 	ID        uuid.UUID `json:"id"`
@@ -41,6 +42,7 @@ func main() {
 	apiConfig := apiConfig{
 		dbQueries: dbQueries,
 		platform: os.Getenv("PLATFORM"),
+		tokenSecret: os.Getenv("JWT_SECRET"),
 	}
 
 	const port = "8080"
