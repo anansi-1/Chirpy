@@ -248,21 +248,20 @@ func (cfg *apiConfig) handleGetChirpsByID(w http.ResponseWriter, r *http.Request
 }
 
 func (cfg *apiConfig) handleLogin(w http.ResponseWriter, r *http.Request) {
-
 	defer r.Body.Close()
 
 	type UserLoginRequest struct {
-		Email    		 string `json:"email"`
-		Password 		 string `json:"password"`
-		ExpiresInSeconds int    `json:"expires_in_seconds"`
+		Email    string `json:"email"`
+		Password string `json:"password"`
 	}
 
 	type LoginResponse struct {
-		ID        string `json:"id"`
-		CreatedAt string `json:"created_at"`
-		UpdatedAt string `json:"updated_at"`
-		Email     string `json:"email"`
-		Token 	  string  `json:"token"`
+		ID           string `json:"id"`
+		CreatedAt    string `json:"created_at"`
+		UpdatedAt    string `json:"updated_at"`
+		Email        string `json:"email"`
+		Token        string `json:"token"`
+		RefreshToken string `json:"refresh_token"`
 	}
 
 	var req UserLoginRequest
@@ -275,37 +274,79 @@ func (cfg *apiConfig) handleLogin(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, http.StatusBadRequest, "Email and password are required")
 		return
 	}
-	user,err := cfg.dbQueries.GetUserByEmail(r.Context(),req.Email)
+
+	user, err := cfg.dbQueries.GetUserByEmail(r.Context(), req.Email)
 	if err != nil {
-		respondWithError(w,http.StatusUnauthorized,"Incorrect email or password")
-		return
-	}
-	err = auth.CheckPasswordHash(req.Password,user.HashedPassword)
-		if err != nil {
-			respondWithError(w,http.StatusUnauthorized,"Incorrect email or password")
+		respondWithError(w, http.StatusUnauthorized, "Incorrect email or password")
 		return
 	}
 
-	const maxExpiration = time.Hour
-	expiration := maxExpiration
-	if req.ExpiresInSeconds > 0{
-		customDuration := time.Duration(req.ExpiresInSeconds)*time.Second
-		if customDuration < maxExpiration{
-			expiration = customDuration
-		}
+	err = auth.CheckPasswordHash(req.Password, user.HashedPassword)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Incorrect email or password")
+		return
 	}
 
+	accessToken, err := auth.MakeJWT(user.ID, cfg.tokenSecret, time.Hour)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to create JWT")
+		return
+	}
 
-	token, err := auth.MakeJWT(user.ID,cfg.tokenSecret,expiration)
+	refreshToken, err := auth.MakeRefreshToken()
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to create refresh token")
+		return
+	}
+
+	refreshExpiresAt := time.Now().Add(60 * 24 * time.Hour) 
+	_, err = cfg.dbQueries.CreateRefreshToken(r.Context(), database.CreateRefreshTokenParams{
+		Token:     refreshToken,
+		UserID:    user.ID,
+		ExpiresAt: refreshExpiresAt,
+	})
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to save refresh token")
+		return
+	}
 
 	resp := LoginResponse{
-		ID:        user.ID.String(),
-		CreatedAt: user.CreatedAt.Format(time.RFC3339),
-		UpdatedAt: user.UpdatedAt.Format(time.RFC3339),
-		Email:     user.Email,
-		Token:	   token,
+		ID:           user.ID.String(),
+		CreatedAt:    user.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:    user.UpdatedAt.Format(time.RFC3339),
+		Email:        user.Email,
+		Token:        accessToken,
+		RefreshToken: refreshToken,
 	}
 
 	respondWithJSON(w, http.StatusOK, resp)
+}
 
+func (cfg *apiConfig) handleRefreshAccessToken(w http.ResponseWriter, r *http.Request) {
+	refreshToken, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Missing or invalid refresh token")
+		return
+	}
+
+	tokenRecord, err := cfg.dbQueries.GetRefreshToken(r.Context(), refreshToken)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Refresh token not found")
+		return
+	}
+
+	if tokenRecord.ExpiresAt.Before(time.Now()) || tokenRecord.RevokedAt.Valid {
+		respondWithError(w, http.StatusUnauthorized, "Refresh token expired or revoked")
+		return
+	}
+
+	newToken, err := auth.MakeJWT(tokenRecord.UserID, cfg.tokenSecret, time.Hour)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Could not create new token")
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, map[string]string{
+		"token": newToken,
+	})
 }
