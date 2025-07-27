@@ -350,3 +350,21 @@ func (cfg *apiConfig) handleRefreshAccessToken(w http.ResponseWriter, r *http.Re
 		"token": newToken,
 	})
 }
+
+func (cfg *apiConfig) handleRevokeRefreshToken(w http.ResponseWriter, r *http.Request) {
+
+	refreshToken, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Missing or invalid refresh token")
+		return
+	}
+
+	err = cfg.dbQueries.RevokeRefreshToken(r.Context(),refreshToken)
+
+	if err != nil{
+		respondWithError(w,http.StatusUnauthorized,"Invalid or already revoked token")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
