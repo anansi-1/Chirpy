@@ -65,3 +65,7 @@ SET email = $2,
     updated_at = NOW()
 WHERE id = $1
 RETURNING id,created_at,updated_at,email;
+
+-- name: DeleteChirpsByID :exec
+DELETE FROM chirps
+WHERE id = $1;
