@@ -69,3 +69,8 @@ RETURNING id,created_at,updated_at,email;
 -- name: DeleteChirpsByID :exec
 DELETE FROM chirps
 WHERE id = $1;
+
+-- name: UpgradeUser :exec
+UPDATE users
+SET is_chirpy_red = true
+WHERE id = $1;
