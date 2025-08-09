@@ -6,6 +6,7 @@ import (
 	"github/anansi-1/Chirpy/internal/auth"
 	"github/anansi-1/Chirpy/internal/database"
 	"net/http"
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -180,7 +181,7 @@ func (cfg *apiConfig) handleCreateChirp(w http.ResponseWriter, r *http.Request) 
 }
 
 func (cfg *apiConfig) handleGetChirps(w http.ResponseWriter, r *http.Request) {
-
+	
 	type ChirpResponse struct {
 		ID        string `json:"id"`
 		CreatedAt string `json:"created_at"`
@@ -189,16 +190,47 @@ func (cfg *apiConfig) handleGetChirps(w http.ResponseWriter, r *http.Request) {
 		UserID    string `json:"user_id"`
 	}
 
-	chirp_rows, err := cfg.dbQueries.GetAllChirps(r.Context())
-	if err != nil {
-		respondWithError(w, http.StatusBadRequest, "Error Getting Chirp")
-		return
+	s := r.URL.Query().Get("author_id")
+	sortOrder := r.URL.Query().Get("sort")
+	if sortOrder != "desc" {
+		sortOrder = "asc"
 	}
 
+	var chirpRows []database.Chirp
+	var err error
+
+	if s != "" {
+		authorID, err := uuid.Parse(s)
+		if err != nil {
+			respondWithError(w, http.StatusBadRequest, "Invalid UUID format")
+			return
+		}
+		authorUUID := uuid.NullUUID{
+			UUID:  authorID,
+			Valid: true,
+		}
+		chirpRows, err = cfg.dbQueries.GetChirpsByAuthorID(r.Context(), authorUUID)
+		if err != nil {
+			respondWithError(w, http.StatusInternalServerError, "Error getting chirps by author")
+			return
+		}
+	} else {
+		chirpRows, err = cfg.dbQueries.GetAllChirps(r.Context())
+		if err != nil {
+			respondWithError(w, http.StatusInternalServerError, "Error getting chirps")
+			return
+		}
+	}
+
+	sort.Slice(chirpRows, func(i, j int) bool {
+		if sortOrder == "asc" {
+			return chirpRows[i].CreatedAt.Before(chirpRows[j].CreatedAt)
+		}
+		return chirpRows[i].CreatedAt.After(chirpRows[j].CreatedAt)
+	})
+
 	var chirps []ChirpResponse
-
-	for _, chirp := range chirp_rows {
-
+	for _, chirp := range chirpRows {
 		resp := ChirpResponse{
 			ID:        chirp.ID.String(),
 			CreatedAt: chirp.CreatedAt.Format(time.RFC3339),
@@ -207,11 +239,9 @@ func (cfg *apiConfig) handleGetChirps(w http.ResponseWriter, r *http.Request) {
 			UserID:    chirp.UserID.UUID.String(),
 		}
 		chirps = append(chirps, resp)
-
 	}
 
 	respondWithJSON(w, http.StatusOK, chirps)
-
 }
 
 func (cfg *apiConfig) handleGetChirpsByID(w http.ResponseWriter, r *http.Request) {
@@ -493,7 +523,7 @@ func (cfg *apiConfig) handleUpgradeWebhook(w http.ResponseWriter, r *http.Reques
 	}
 
 	if apiKey != cfg.apiKey {
-		respondWithError(w,http.StatusUnauthorized,"Unauthorized")
+		respondWithError(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
 
