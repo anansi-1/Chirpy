@@ -80,10 +80,11 @@ func (cfg *apiConfig) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type UserResponse struct {
-		ID        string `json:"id"`
-		CreatedAt string `json:"created_at"`
-		UpdatedAt string `json:"updated_at"`
-		Email     string `json:"email"`
+		ID          string `json:"id"`
+		CreatedAt   string `json:"created_at"`
+		UpdatedAt   string `json:"updated_at"`
+		Email       string `json:"email"`
+		IsChirpyRed bool   `json:"is_chirpy_red"`
 	}
 
 	var req createUserRequest
@@ -106,19 +107,20 @@ func (cfg *apiConfig) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		HashedPassword: hashedPassword,
 	})
 	if err != nil {
-	if pgErr, ok := err.(*pq.Error); ok && pgErr.Code == "23505" {
-		respondWithError(w, http.StatusConflict, "Email already exists")
+		if pgErr, ok := err.(*pq.Error); ok && pgErr.Code == "23505" {
+			respondWithError(w, http.StatusConflict, "Email already exists")
+			return
+		}
+		respondWithError(w, http.StatusBadRequest, "Error creating user")
 		return
 	}
-	respondWithError(w, http.StatusBadRequest, "Error creating user")
-	return
-}
 
 	resp := UserResponse{
-		ID:        user.ID.String(),
-		CreatedAt: user.CreatedAt.Format(time.RFC3339),
-		UpdatedAt: user.UpdatedAt.Format(time.RFC3339),
-		Email:     user.Email,
+		ID:          user.ID.String(),
+		CreatedAt:   user.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:   user.UpdatedAt.Format(time.RFC3339),
+		Email:       user.Email,
+		IsChirpyRed: user.IsChirpyRed.Bool,
 	}
 
 	respondWithJSON(w, http.StatusCreated, resp)
@@ -260,6 +262,7 @@ func (cfg *apiConfig) handleLogin(w http.ResponseWriter, r *http.Request) {
 		CreatedAt    string `json:"created_at"`
 		UpdatedAt    string `json:"updated_at"`
 		Email        string `json:"email"`
+		IsChirpyRed  bool   `json:"is_chirpy_red"`
 		Token        string `json:"token"`
 		RefreshToken string `json:"refresh_token"`
 	}
@@ -299,7 +302,7 @@ func (cfg *apiConfig) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	refreshExpiresAt := time.Now().Add(60 * 24 * time.Hour) 
+	refreshExpiresAt := time.Now().Add(60 * 24 * time.Hour)
 	_, err = cfg.dbQueries.CreateRefreshToken(r.Context(), database.CreateRefreshTokenParams{
 		Token:     refreshToken,
 		UserID:    user.ID,
@@ -315,6 +318,7 @@ func (cfg *apiConfig) handleLogin(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:    user.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:    user.UpdatedAt.Format(time.RFC3339),
 		Email:        user.Email,
+		IsChirpyRed:  user.IsChirpyRed.Bool,
 		Token:        accessToken,
 		RefreshToken: refreshToken,
 	}
@@ -359,10 +363,10 @@ func (cfg *apiConfig) handleRevokeRefreshToken(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	err = cfg.dbQueries.RevokeRefreshToken(r.Context(),refreshToken)
+	err = cfg.dbQueries.RevokeRefreshToken(r.Context(), refreshToken)
 
-	if err != nil{
-		respondWithError(w,http.StatusUnauthorized,"Invalid or already revoked token")
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Invalid or already revoked token")
 		return
 	}
 
@@ -376,28 +380,29 @@ func (cfg *apiConfig) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, http.StatusUnauthorized, "Missing or invalid Authorization header")
 		return
 	}
-	
+
 	userID, err := auth.ValidateJWT(tokenStr, cfg.tokenSecret)
 	if err != nil {
 		respondWithError(w, http.StatusUnauthorized, "Invalid or expired token")
 		return
 	}
 
-	type userUpdateRequest struct{
-		Email string `json:"email"`
+	type userUpdateRequest struct {
+		Email    string `json:"email"`
 		Password string `json:"password"`
 	}
 
 	type UserResponse struct {
-		ID        string `json:"id"`
-		CreatedAt string `json:"created_at"`
-		UpdatedAt string `json:"updated_at"`
-		Email     string `json:"email"`
+		ID          string `json:"id"`
+		CreatedAt   string `json:"created_at"`
+		UpdatedAt   string `json:"updated_at"`
+		Email       string `json:"email"`
+		IsChirpyRed bool   `json:"is_chirpy_red"`
 	}
 
 	var userUpdate userUpdateRequest
 
-		if err := json.NewDecoder(r.Body).Decode(&userUpdate); err != nil {
+	if err := json.NewDecoder(r.Body).Decode(&userUpdate); err != nil {
 		respondWithError(w, http.StatusBadRequest, "Invalid JSON")
 		return
 	}
@@ -413,9 +418,9 @@ func (cfg *apiConfig) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user,err := cfg.dbQueries.UpdateUser(r.Context(),database.UpdateUserParams{
-		ID: userID,
-		Email: userUpdate.Email,
+	user, err := cfg.dbQueries.UpdateUser(r.Context(), database.UpdateUserParams{
+		ID:             userID,
+		Email:          userUpdate.Email,
 		HashedPassword: hashedPassword,
 	})
 
@@ -425,10 +430,11 @@ func (cfg *apiConfig) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := UserResponse{
-		ID:        user.ID.String(),
-		CreatedAt: user.CreatedAt.Format(time.RFC3339),
-		UpdatedAt: user.UpdatedAt.Format(time.RFC3339),
-		Email:     user.Email,
+		ID:          user.ID.String(),
+		CreatedAt:   user.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:   user.UpdatedAt.Format(time.RFC3339),
+		Email:       user.Email,
+		IsChirpyRed: user.IsChirpyRed.Bool,
 	}
 
 	respondWithJSON(w, http.StatusOK, resp)
@@ -464,10 +470,9 @@ func (cfg *apiConfig) handleDeleteChirp(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if !chirp.UserID.Valid || chirp.UserID.UUID.String() != userID.String() {
-	respondWithError(w, http.StatusForbidden, "You are not the owner of this chirp")
-	return
-}
-
+		respondWithError(w, http.StatusForbidden, "You are not the owner of this chirp")
+		return
+	}
 
 	err = cfg.dbQueries.DeleteChirpsByID(r.Context(), chirpUUID)
 	if err != nil {
@@ -476,4 +481,56 @@ func (cfg *apiConfig) handleDeleteChirp(w http.ResponseWriter, r *http.Request) 
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (cfg *apiConfig) handleUpgradeWebhook(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+
+	apiKey, err := auth.GetAPIKey(r.Header)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Missing or invalid Authorization header")
+		return
+	}
+
+	if apiKey != cfg.apiKey {
+		respondWithError(w,http.StatusUnauthorized,"Unauthorized")
+		return
+	}
+
+	type UpgradeRequest struct {
+		Event string `json:"event"`
+		Data  struct {
+			UserID string `json:"user_id"`
+		} `json:"data"`
+	}
+
+	var upgradeBody UpgradeRequest
+	if err := json.NewDecoder(r.Body).Decode(&upgradeBody); err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid JSON")
+		return
+	}
+
+	if upgradeBody.Event != "user.upgraded" {
+		respondWithJSON(w, http.StatusNoContent, nil)
+		return
+	}
+
+	userID, err := uuid.Parse(upgradeBody.Data.UserID)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid UUID format")
+		return
+	}
+
+	rowsAffected, err := cfg.dbQueries.UpgradeUser(r.Context(), userID)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to upgrade user")
+		return
+	}
+
+	if rowsAffected == 0 {
+		respondWithError(w, http.StatusNotFound, "User not found")
+		return
+	}
+
+	respondWithJSON(w, http.StatusNoContent, nil)
 }

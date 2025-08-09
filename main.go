@@ -6,8 +6,8 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"time"
 	"sync/atomic"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
@@ -19,6 +19,7 @@ type apiConfig struct {
 	dbQueries      *database.Queries
 	platform 		string
 	tokenSecret      string
+	apiKey			string
 }
 type User struct {
 	ID        uuid.UUID `json:"id"`
@@ -43,6 +44,7 @@ func main() {
 		dbQueries: dbQueries,
 		platform: os.Getenv("PLATFORM"),
 		tokenSecret: os.Getenv("JWT_SECRET"),
+		apiKey: os.Getenv("POLKA_KEY"),
 	}
 
 	const port = "8080"
@@ -66,6 +68,8 @@ func main() {
 	mux.HandleFunc("POST /api/revoke",apiConfig.handleRevokeRefreshToken)
 	mux.HandleFunc("PUT /api/users",apiConfig.handleUpdateUser)
 	mux.HandleFunc("DELETE /api/chirps/{chirpID}",apiConfig.handleDeleteChirp)
+	mux.HandleFunc("POST /api/polka/webhooks",apiConfig.handleUpgradeWebhook)
+
 	srv := &http.Server{ 
 		Addr:    ":" + port,
 		Handler: mux,

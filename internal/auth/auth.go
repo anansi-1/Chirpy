@@ -111,3 +111,22 @@ func MakeRefreshToken() (string, error){
 
 	return token,nil
 }
+
+func GetAPIKey(headers http.Header) (string, error) {
+	authHeader := headers.Get("Authorization")
+	if authHeader == "" {
+		return "", errors.New("authorization header missing")
+	}
+
+	const prefix = "ApiKey "
+	if !strings.HasPrefix(authHeader, prefix) {
+		return "", errors.New("authorization header must start with 'ApiKey '")
+	}
+
+	apiKey := strings.TrimSpace(strings.TrimPrefix(authHeader, prefix))
+	if apiKey == "" {
+		return "", errors.New("API key is empty")
+	}
+
+	return apiKey, nil
+}
